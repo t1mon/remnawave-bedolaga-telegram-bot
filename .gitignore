@@ -19,6 +19,9 @@
 !release-please-config.json
 !.release-please-manifest.json
 
+!DockerfileDev
+!docker-compose-dev.yml
+
 # Документация
 !README.md
 !LICENSE
