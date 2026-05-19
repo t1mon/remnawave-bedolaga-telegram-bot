@@ -17,6 +17,7 @@ fastapi==0.129.0
 uvicorn==0.32.1
 websockets>=12.0
 python-multipart==0.0.9
+pycryptodome>=3.21.0
 
 # YooKassa SDK
 yookassa==3.10.0
