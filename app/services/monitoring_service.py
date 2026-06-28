@@ -356,6 +356,7 @@ class MonitoringService:
                 await self._check_expired_subscriptions(db)
                 await self._check_expiring_subscriptions(db)
                 await self._check_trial_expiring_soon(db)
+                await self._check_trial_expiring_extra(db)  # FORK:email-trial
                 await self._check_trial_channel_subscriptions(db)
                 await self._check_expired_subscription_followups(db)
                 await self._check_traffic_warnings(db)
@@ -829,6 +830,69 @@ class MonitoringService:
 
         except Exception as e:
             logger.error('Ошибка проверки истекающих тестовых подписок', error=e)
+
+    async def _check_trial_expiring_extra(self, db: AsyncSession):
+        # FORK:email-trial — дополнительное предупреждение за 24 часа до конца триала
+        try:
+            now = datetime.now(UTC)
+            upper = now + timedelta(hours=24)
+            lower = now + timedelta(hours=2)  # нижняя граница = существующий порог 2ч (без пересечения)
+
+            result = await db.execute(
+                select(Subscription)
+                .join(Subscription.user)
+                .options(
+                    selectinload(Subscription.tariff),
+                    selectinload(Subscription.user).selectinload(User.promo_group),
+                    selectinload(Subscription.user)
+                    .selectinload(User.user_promo_groups)
+                    .selectinload(UserPromoGroup.promo_group),
+                )
+                .where(
+                    and_(
+                        Subscription.status == SubscriptionStatus.ACTIVE.value,
+                        Subscription.is_trial == True,
+                        Subscription.end_date <= upper,
+                        Subscription.end_date > lower,
+                        User.status == UserStatus.ACTIVE.value,
+                    )
+                )
+            )
+            trial_expiring = result.scalars().all()
+
+            sent_count = 0
+            for subscription in trial_expiring:
+                user = subscription.user
+                if not user:
+                    continue
+
+                # Telegram-пользователю без активного бота уведомление не отправить
+                if user.telegram_id and not self.bot:
+                    continue
+
+                if await notification_sent(db, user.id, subscription.id, 'trial_24h'):
+                    continue
+
+                success = await self._send_trial_ending_notification(user, subscription, hours_left=24)
+                if success:
+                    sent_count += 1
+                    await record_notification(db, user.id, subscription.id, 'trial_24h')
+                    logger.info(
+                        '🎁 Отправлено уведомление об окончании тестовой подписки за 24 часа',
+                        user_id=user.id,
+                        telegram_id=user.telegram_id,
+                    )
+
+            if sent_count:
+                await self._log_monitoring_event(
+                    db,
+                    'trial_expiring_24h_notifications_sent',
+                    f'Отправлено {sent_count} уведомлений об окончании тестовых подписок за 24 часа',
+                    {'count': sent_count},
+                )
+
+        except Exception as e:
+            logger.error('Ошибка проверки истекающих тестовых подписок (24 часа)', error=e)
 
     async def _check_trial_channel_subscriptions(self, db: AsyncSession):
         """Background reconciliation of channel subscriptions (rate-limited).
@@ -1869,9 +1933,31 @@ class MonitoringService:
             )
             return False
 
-    async def _send_trial_ending_notification(self, user: User, subscription: Subscription) -> bool:
+    async def _send_trial_ending_notification(
+        self, user: User, subscription: Subscription, hours_left: int = 2
+    ) -> bool:
+        # FORK:email-trial — email-only пользователи получают уведомление через единый сервис доставки
+        if not user.telegram_id:
+            from app.services.notification_delivery_service import notification_delivery_service
+
+            return await notification_delivery_service.notify_subscription_expiring(
+                user=user,
+                days_left=max(hours_left // 24, 0),
+                expires_at=subscription.end_date,
+            )
         try:
             get_texts(user.language)
+
+            # FORK:email-trial — корректное склонение часов (2 часа / 24 часа)
+            _h = hours_left
+            if 11 <= _h % 100 <= 14:
+                hours_phrase = f'{_h} часов'
+            elif _h % 10 == 1:
+                hours_phrase = f'{_h} час'
+            elif _h % 10 in (2, 3, 4):
+                hours_phrase = f'{_h} часа'
+            else:
+                hours_phrase = f'{_h} часов'
 
             tariff_label = ''
             if settings.is_multi_tariff_enabled() and hasattr(subscription, 'tariff') and subscription.tariff:
@@ -1879,7 +1965,7 @@ class MonitoringService:
             message = f"""
 🎁 <b>Тестовая подписка{tariff_label} скоро закончится!</b>
 
-Ваша тестовая подписка истекает через 2 часа.
+Ваша тестовая подписка истекает через {hours_phrase}.
 
 💎 <b>Не хотите остаться без VPN?</b>
 Переходите на полную подписку!
