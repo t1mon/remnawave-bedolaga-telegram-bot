@@ -76,6 +76,43 @@ logger = structlog.get_logger(__name__)
 
 _SUBID_DELIMITER = '_subid_'
 
+# --- AHOWS patch (clickId deep-link + first_connected postback) ---
+# Telegram forbids `&` in ?start= payloads; ahows uses `__` as a stand-in.
+# Example: ?start=promo123__clickId=abc123  →  campaign=promo123, clickId=abc123
+# Saved as subid; S2S postback fires later on Remnawave user.first_connected.
+_AHOWS_PARAM_SEP = '__'
+_AHOWS_CLICK_ID_KEY = 'clickId'
+# --- end AHOWS patch markers (helpers below) ---
+
+
+def _split_start_param_ahows_click_id(param: str | None) -> tuple[str | None, str | None]:
+    """AHOWS patch: extract ``clickId`` from ``promo__clickId=VALUE`` start payload.
+
+    ``__`` replaces ``&`` (Telegram-safe). Bare ``clickId=VALUE`` is also accepted.
+    Returns ``(campaign_or_None, click_id)`` or ``(param, None)`` if not ahows format.
+    """
+    if not param:
+        return param, None
+    key_prefix = f'{_AHOWS_CLICK_ID_KEY}='
+    if key_prefix not in param:
+        return param, None
+
+    click_id: str | None = None
+    campaign_parts: list[str] = []
+    for part in param.split(_AHOWS_PARAM_SEP):
+        if not part:
+            continue
+        if part.startswith(key_prefix):
+            click_id = part[len(key_prefix) :]
+        else:
+            campaign_parts.append(part)
+
+    if not click_id or len(click_id) > 255:
+        return param, None
+
+    campaign = _AHOWS_PARAM_SEP.join(campaign_parts) if campaign_parts else None
+    return campaign, click_id
+
 
 def _split_start_param_subid(param: str | None) -> tuple[str | None, str | None]:
     """Extract subid from ``{campaign}_subid_{subid}`` Telegram deeplink format.
@@ -85,15 +122,20 @@ def _split_start_param_subid(param: str | None) -> tuple[str | None, str | None]
     AdvertisingCampaign lookup proceed; the subid is stashed in FSM state to be
     persisted post-registration via :data:`yandex_client_id.upsert_subid`.
 
+    Also accepts AHOWS ``__clickId=`` form (see :func:`_split_start_param_ahows_click_id`).
+
     Returns ``(param, None)`` when no delimiter, when either side is empty, or
     when the subid would overflow the YandexClientIdMap.subid column (255).
     """
-    if not param or _SUBID_DELIMITER not in param:
+    if not param:
         return param, None
-    head, _, tail = param.partition(_SUBID_DELIMITER)
-    if not head or not tail or len(tail) > 255:
-        return param, None
-    return head, tail
+    if _SUBID_DELIMITER in param:
+        head, _, tail = param.partition(_SUBID_DELIMITER)
+        if not head or not tail or len(tail) > 255:
+            return param, None
+        return head, tail
+    # AHOWS patch: fall through to clickId parser when Keitaro delimiter absent
+    return _split_start_param_ahows_click_id(param)
 
 
 async def _persist_pending_subid_after_registration(
@@ -1091,8 +1133,9 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
         start_parameter = None
 
     # Keitaro/affiliate click ID rides on /start as `{campaign}_subid_{click_id}`
-    # (64 chars total). Pull the click_id into FSM state and continue campaign
-    # lookup with the bare campaign portion.
+    # (64 chars total). AHOWS patch also accepts `{campaign}__clickId={id}`.
+    # Pull the click_id into FSM state and continue campaign lookup with the
+    # bare campaign portion.
     if start_parameter:
         campaign_part, subid_from_link = _split_start_param_subid(start_parameter)
         if subid_from_link:
@@ -1102,6 +1145,7 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
                 'Captured subid from /start deeplink',
                 telegram_id=message.from_user.id,
                 campaign=campaign_part,
+                # AHOWS patch: clickId lands in pending_subid the same way as Keitaro
             )
 
     if start_parameter:

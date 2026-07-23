@@ -1698,6 +1698,30 @@ class RemnaWaveWebhookService:
             subscription=subscription,
         )
 
+        # --- AHOWS patch: S2S postback on first VPN connection (#first_connected) ---
+        # clickId was saved earlier from /start (...__clickId=VALUE) into yandex_client_id_map.subid.
+        # Conversion fires here once — not on bot registration.
+        try:
+            from app.database.crud.yandex_client_id import get_subid
+            from app.services.s2s_postback_service import send_postback
+
+            subid = await get_subid(db, user.id)
+            if subid:
+                await send_postback('first_connected', subid, user_id=user.id)
+            else:
+                logger.debug(
+                    'AHOWS first_connected: no subid/clickId for user, skip postback',
+                    user_id=user.id,
+                )
+        except Exception as e:
+            logger.error(
+                'AHOWS first_connected postback failed',
+                user_id=user.id,
+                error=str(e),
+                exc_info=True,
+            )
+        # --- end AHOWS patch ---
+
     async def _handle_bandwidth_threshold(
         self, db: AsyncSession, user: User, subscription: Subscription | None, data: dict
     ) -> None:

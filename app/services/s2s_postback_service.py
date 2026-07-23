@@ -23,6 +23,8 @@ def _get_url(event: str) -> str | None:
         'registration': getattr(settings, 'S2S_POSTBACK_REGISTRATION_URL', ''),
         'trial': getattr(settings, 'S2S_POSTBACK_TRIAL_URL', ''),
         'purchase': getattr(settings, 'S2S_POSTBACK_PURCHASE_URL', ''),
+        # AHOWS patch: first VPN connection (Remnawave user.first_connected)
+        'first_connected': getattr(settings, 'S2S_POSTBACK_FIRST_CONNECTED_URL', ''),
     }
     url = mapping.get(event, '')
     return url or None
@@ -37,8 +39,8 @@ async def send_postback(
     """Send S2S postback for an event.
 
     Args:
-        event: 'registration', 'trial', or 'purchase'
-        subid: tracking subid from URL
+        event: 'registration', 'trial', 'purchase', or 'first_connected' (AHOWS patch)
+        subid: tracking subid / clickId from URL
         amount: purchase amount in rubles (for purchase event)
         user_id: internal user ID for logging
 
