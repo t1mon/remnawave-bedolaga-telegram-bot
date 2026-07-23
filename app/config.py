@@ -729,11 +729,10 @@ class Settings(BaseSettings):
     # ── S2S Postback (server-to-server affiliate notifications) ──
     S2S_POSTBACK_ENABLED: bool = False
     S2S_POSTBACK_REGISTRATION_URL: str = ''
+    # AHOWS patch: fired on trial activation in bot/cabinet (not Remnawave first_connected).
+    # Template example: https://us.ahows.co/log?action=conversion&key={subid}
     S2S_POSTBACK_TRIAL_URL: str = ''
     S2S_POSTBACK_PURCHASE_URL: str = ''
-    # AHOWS patch: fired from Remnawave webhook user.first_connected (first VPN connect).
-    # Template example: https://us.ahows.co/log?action=conversion&key={subid}
-    S2S_POSTBACK_FIRST_CONNECTED_URL: str = ''
 
     # RioPay (api.riopay.online) v2.0.1
     RIOPAY_ENABLED: bool = False

@@ -1273,6 +1273,12 @@ async def activate_trial(callback: types.CallbackQuery, db_user: User, db: Async
 
         logger.info('✅ Активирована тестовая подписка для пользователя', telegram_id=db_user.telegram_id)
 
+        # --- AHOWS patch: S2S postback on trial activation (if clickId/subid present) ---
+        from app.services.s2s_postback_service import send_ahows_trial_postback_if_subid
+
+        await send_ahows_trial_postback_if_subid(db, db_user.id)
+        # --- end AHOWS patch ---
+
     except Exception as e:
         logger.error('Ошибка активации триала', error=e)
         failure_text = texts.ERROR
@@ -3417,6 +3423,12 @@ async def handle_trial_pay_with_balance(callback: types.CallbackQuery, db_user: 
             )
         except Exception as e:
             logger.error('Ошибка отправки уведомления о триале', error=e)
+
+        # --- AHOWS patch: S2S postback on paid trial activation (if clickId/subid present) ---
+        from app.services.s2s_postback_service import send_ahows_trial_postback_if_subid
+
+        await send_ahows_trial_postback_if_subid(db, db_user.id)
+        # --- end AHOWS patch ---
 
         # Показываем успешное сообщение с ссылкой
         subscription_link = get_display_subscription_link(subscription)

@@ -76,10 +76,10 @@ logger = structlog.get_logger(__name__)
 
 _SUBID_DELIMITER = '_subid_'
 
-# --- AHOWS patch (clickId deep-link + first_connected postback) ---
+# --- AHOWS patch (clickId deep-link + trial postback) ---
 # Telegram forbids `&` in ?start= payloads; ahows uses `__` as a stand-in.
 # Example: ?start=promo123__clickId=abc123  →  campaign=promo123, clickId=abc123
-# Saved as subid; S2S postback fires later on Remnawave user.first_connected.
+# Saved as subid; S2S postback fires later on trial activation (bot/cabinet).
 _AHOWS_PARAM_SEP = '__'
 _AHOWS_CLICK_ID_KEY = 'clickId'
 # --- end AHOWS patch markers (helpers below) ---

@@ -1593,4 +1593,10 @@ async def activate_trial(
             error=str(yconv_err),
         )
 
+    # --- AHOWS patch: S2S postback on cabinet trial activation (if clickId/subid present) ---
+    from app.services.s2s_postback_service import send_ahows_trial_postback_if_subid
+
+    await send_ahows_trial_postback_if_subid(db, user.id)
+    # --- end AHOWS patch ---
+
     return _subscription_to_response(subscription, user=user)

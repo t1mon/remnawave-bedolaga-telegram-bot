@@ -1,6 +1,7 @@
 """S2S Postback Service — sends server-to-server postbacks on events."""
 
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 
@@ -21,10 +22,9 @@ def _get_url(event: str) -> str | None:
     """Get postback URL template for event type."""
     mapping = {
         'registration': getattr(settings, 'S2S_POSTBACK_REGISTRATION_URL', ''),
+        # AHOWS patch: trial activation in bot/cabinet (clickId → conversion)
         'trial': getattr(settings, 'S2S_POSTBACK_TRIAL_URL', ''),
         'purchase': getattr(settings, 'S2S_POSTBACK_PURCHASE_URL', ''),
-        # AHOWS patch: first VPN connection (Remnawave user.first_connected)
-        'first_connected': getattr(settings, 'S2S_POSTBACK_FIRST_CONNECTED_URL', ''),
     }
     url = mapping.get(event, '')
     return url or None
@@ -39,7 +39,7 @@ async def send_postback(
     """Send S2S postback for an event.
 
     Args:
-        event: 'registration', 'trial', 'purchase', or 'first_connected' (AHOWS patch)
+        event: 'registration', 'trial', or 'purchase'
         subid: tracking subid / clickId from URL
         amount: purchase amount in rubles (for purchase event)
         user_id: internal user ID for logging
@@ -90,5 +90,32 @@ async def send_postback(
             subid=subid,
             error=str(e),
             url=url[:100],
+        )
+        return False
+
+
+async def send_ahows_trial_postback_if_subid(db: AsyncSession, user_id: int) -> bool:
+    """AHOWS patch: S2S conversion postback on trial activation when clickId/subid exists.
+
+    clickId is captured from /start ``...__clickId=VALUE`` and stored in
+    yandex_client_id_map.subid. Without subid the postback is skipped.
+    """
+    try:
+        from app.database.crud.yandex_client_id import get_subid
+
+        subid = await get_subid(db, user_id)
+        if not subid:
+            logger.debug(
+                'AHOWS trial: no subid/clickId for user, skip postback',
+                user_id=user_id,
+            )
+            return False
+        return await send_postback('trial', subid, user_id=user_id)
+    except Exception as e:
+        logger.error(
+            'AHOWS trial postback failed',
+            user_id=user_id,
+            error=str(e),
+            exc_info=True,
         )
         return False
